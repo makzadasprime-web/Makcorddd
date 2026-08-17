@@ -258,6 +258,7 @@ img.member-avatar,img.tile-avatar,img.msg-avatar,img.mini-avatar,img.avatar-prev
 /* ---------- rail de servidores ---------- */
 .rail{gap:8px;padding-bottom:10px;overflow-y:auto;}
 .server-rail-list{display:flex;flex-direction:column;gap:8px;margin-top:12px;}
+.rail-server-wrap{position:relative;}
 .rail-server{
   width:42px;height:42px;border-radius:14px;background:var(--bg-elevated);border:none;color:var(--text-primary);
   font-family:var(--font-display);font-weight:700;font-size:14px;cursor:pointer;
@@ -265,6 +266,14 @@ img.member-avatar,img.tile-avatar,img.msg-avatar,img.mini-avatar,img.avatar-prev
 }
 .rail-server:hover{background:var(--bg-hover);border-radius:11px;}
 .rail-server.active{background:var(--accent);border-radius:11px;}
+.rail-server-remove{
+  position:absolute;top:-5px;right:-5px;width:17px;height:17px;border-radius:50%;
+  background:var(--danger);color:#fff;border:2px solid var(--bg-app);font-size:11px;line-height:1;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;
+  opacity:0;transition:opacity .12s;
+}
+.rail-server-wrap:hover .rail-server-remove{opacity:1;}
+.rail-server-remove:hover{background:#ff6b85;}
 .rail-add{
   width:42px;height:42px;border-radius:14px;background:var(--bg-elevated);border:none;color:var(--accent-2);
   font-size:20px;font-weight:700;cursor:pointer;margin-top:2px;transition:border-radius .15s,background .15s;
@@ -699,6 +708,7 @@ const CallManager = (() => {
       channelMembers = {};
       Object.values(channels).forEach(c => { if (c.type === 'voice') channelMembers[c.id] = new Set(); });
       peer = new Peer(peerIdForRoom(roomCode), { debug: 1 });
+      attachReconnectHandling(peer);
 
       peer.on('open', id => {
         myId = id;
@@ -720,6 +730,7 @@ const CallManager = (() => {
       roomCode = code.trim().toUpperCase();
       isHost = false;
       peer = new Peer({ debug: 1 });
+      attachReconnectHandling(peer);
 
       peer.on('open', id => {
         myId = id;
@@ -765,6 +776,39 @@ const CallManager = (() => {
       });
 
       peer.on('error', err => handlePeerError(err, reject));
+    });
+  }
+
+  /* ---------------- manter o peer vivo no broker de sinalização ----------------
+     O broker público do PeerJS derruba a conexão de sinalização (WebSocket) por
+     inatividade, aba em segundo plano, Wi-Fi instável, etc. Isso NÃO destrói o
+     peer nem libera o ID, mas enquanto ele estiver "disconnected" ninguém
+     consegue te encontrar — é a causa mais comum de "servidor não encontrado"
+     depois de um tempo. Aqui a gente detecta e reconecta automaticamente. */
+  function attachReconnectHandling(p) {
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
+    p.on('disconnected', () => {
+      if (p.destroyed) return;
+      fire('systemMessage', 'Conexão com o servidor de sinalização caiu — reconectando…');
+      const tryReconnect = () => {
+        if (p.destroyed || !p.disconnected) return;
+        reconnectAttempts++;
+        p.reconnect();
+        reconnectTimer = setTimeout(tryReconnect, Math.min(2000 * reconnectAttempts, 10000));
+      };
+      reconnectTimer = setTimeout(tryReconnect, 500);
+    });
+    p.on('open', () => {
+      reconnectAttempts = 0;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    });
+    // volta a tentar reconectar assim que a aba fica visível/online de novo
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && p.disconnected && !p.destroyed) p.reconnect();
+    });
+    window.addEventListener('online', () => {
+      if (p.disconnected && !p.destroyed) p.reconnect();
     });
   }
 
@@ -894,8 +938,12 @@ const CallManager = (() => {
         if (isHost) {
           const ok = hostAdmitVoice(msg.id, msg.channelId);
           if (ok) {
+            // aplica localmente no dono (cobre inclusive o próprio dono entrando
+            // na chamada) e depois avisa todo mundo — incluindo quem pediu.
+            handleIncomingMessage({ type: 'call-join', id: msg.id, channelId: msg.channelId }, null);
             hostBroadcast({ type: 'call-join', id: msg.id, channelId: msg.channelId });
-            if (msg.id !== myId) hostSendTo(msg.id, { type: 'call-join', id: msg.id, channelId: msg.channelId });
+          } else if (msg.id === myId) {
+            fire('voiceDenied', msg.channelId);
           } else {
             hostSendTo(msg.id, { type: 'call-join-denied', id: msg.id, channelId: msg.channelId });
           }
@@ -905,8 +953,10 @@ const CallManager = (() => {
         if (!channelMembers[msg.channelId]) channelMembers[msg.channelId] = new Set();
         channelMembers[msg.channelId].add(msg.id);
         fire('voiceRoster', msg.channelId, Array.from(channelMembers[msg.channelId]));
+        // só quem está ENTRANDO conecta com quem já está lá (via applyLocalVoiceJoin);
+        // quem já estava no canal apenas atende (peer.on('call')), pra não criar
+        // duas conexões de mídia duplicadas entre o mesmo par.
         if (msg.id === myId) applyLocalVoiceJoin(msg.channelId);
-        else if (myVoiceChannel === msg.channelId && localStream) connectVoicePeer(msg.id);
         break;
       case 'call-join-denied':
         if (msg.id === myId) fire('voiceDenied', msg.channelId);
@@ -1364,14 +1414,23 @@ const CallManager = (() => {
   }
 
   /* ===================== ABA DE SERVIDORES (rail) ===================== */
+  // A lista fica salva no localStorage do navegador PARA SEMPRE — nada aqui
+  // expira ou é apagado sozinho com o tempo; só sai da lista o que o próprio
+  // usuário remover clicando no "×".
   function getSavedServers() {
     try { return JSON.parse(localStorage.getItem(SERVERS_KEY)) || []; } catch (e) { return []; }
   }
-  function saveServerToRail(code, name) {
-    let list = getSavedServers().filter(s => s.code !== code);
-    list.unshift({ code, name: name || code });
-    list = list.slice(0, 12);
+  function setSavedServers(list) {
     try { localStorage.setItem(SERVERS_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+  function saveServerToRail(code, name) {
+    const list = getSavedServers().filter(s => s.code !== code);
+    list.unshift({ code, name: name || code });
+    setSavedServers(list);
+    renderServerRail();
+  }
+  function removeServerFromRail(code) {
+    setSavedServers(getSavedServers().filter(s => s.code !== code));
     renderServerRail();
   }
   function renderServerRail() {
@@ -1379,13 +1438,36 @@ const CallManager = (() => {
     if (!rail) return;
     rail.innerHTML = '';
     getSavedServers().forEach(s => {
-      const btn = document.createElement('button');
+      const wrap = document.createElement('div');
+      wrap.className = 'rail-server-wrap';
       const active = CallManager.roomCode === s.code;
+
+      const btn = document.createElement('button');
       btn.className = 'rail-server' + (active ? ' active' : '');
       btn.title = s.name;
       btn.textContent = initials(s.name || s.code);
       btn.addEventListener('click', () => switchServer(s.code));
-      rail.appendChild(btn);
+
+      const rm = document.createElement('button');
+      rm.className = 'rail-server-remove';
+      rm.title = 'Remover "' + s.name + '" da lista';
+      rm.textContent = '×';
+      rm.addEventListener('click', ev => {
+        ev.stopPropagation();
+        if (confirm(`Remover "${s.name}" da sua lista de servidores? (o servidor em si continua existindo, você só precisará do código pra entrar de novo)`)) {
+          const wasActive = CallManager.roomCode === s.code;
+          removeServerFromRail(s.code);
+          if (wasActive) {
+            CallManager.leaveRoom();
+            resetRoomUiState();
+            showScreen('lobby');
+          }
+        }
+      });
+
+      wrap.appendChild(btn);
+      wrap.appendChild(rm);
+      rail.appendChild(wrap);
     });
   }
   async function switchServer(code) {

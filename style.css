@@ -248,6 +248,7 @@ img.member-avatar,img.tile-avatar,img.msg-avatar,img.mini-avatar,img.avatar-prev
 /* ---------- rail de servidores ---------- */
 .rail{gap:8px;padding-bottom:10px;overflow-y:auto;}
 .server-rail-list{display:flex;flex-direction:column;gap:8px;margin-top:12px;}
+.rail-server-wrap{position:relative;}
 .rail-server{
   width:42px;height:42px;border-radius:14px;background:var(--bg-elevated);border:none;color:var(--text-primary);
   font-family:var(--font-display);font-weight:700;font-size:14px;cursor:pointer;
@@ -255,6 +256,14 @@ img.member-avatar,img.tile-avatar,img.msg-avatar,img.mini-avatar,img.avatar-prev
 }
 .rail-server:hover{background:var(--bg-hover);border-radius:11px;}
 .rail-server.active{background:var(--accent);border-radius:11px;}
+.rail-server-remove{
+  position:absolute;top:-5px;right:-5px;width:17px;height:17px;border-radius:50%;
+  background:var(--danger);color:#fff;border:2px solid var(--bg-app);font-size:11px;line-height:1;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;
+  opacity:0;transition:opacity .12s;
+}
+.rail-server-wrap:hover .rail-server-remove{opacity:1;}
+.rail-server-remove:hover{background:#ff6b85;}
 .rail-add{
   width:42px;height:42px;border-radius:14px;background:var(--bg-elevated);border:none;color:var(--accent-2);
   font-size:20px;font-weight:700;cursor:pointer;margin-top:2px;transition:border-radius .15s,background .15s;

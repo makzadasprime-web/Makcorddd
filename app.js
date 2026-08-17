@@ -133,14 +133,23 @@
   }
 
   /* ===================== ABA DE SERVIDORES (rail) ===================== */
+  // A lista fica salva no localStorage do navegador PARA SEMPRE — nada aqui
+  // expira ou é apagado sozinho com o tempo; só sai da lista o que o próprio
+  // usuário remover clicando no "×".
   function getSavedServers() {
     try { return JSON.parse(localStorage.getItem(SERVERS_KEY)) || []; } catch (e) { return []; }
   }
-  function saveServerToRail(code, name) {
-    let list = getSavedServers().filter(s => s.code !== code);
-    list.unshift({ code, name: name || code });
-    list = list.slice(0, 12);
+  function setSavedServers(list) {
     try { localStorage.setItem(SERVERS_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+  function saveServerToRail(code, name) {
+    const list = getSavedServers().filter(s => s.code !== code);
+    list.unshift({ code, name: name || code });
+    setSavedServers(list);
+    renderServerRail();
+  }
+  function removeServerFromRail(code) {
+    setSavedServers(getSavedServers().filter(s => s.code !== code));
     renderServerRail();
   }
   function renderServerRail() {
@@ -148,13 +157,36 @@
     if (!rail) return;
     rail.innerHTML = '';
     getSavedServers().forEach(s => {
-      const btn = document.createElement('button');
+      const wrap = document.createElement('div');
+      wrap.className = 'rail-server-wrap';
       const active = CallManager.roomCode === s.code;
+
+      const btn = document.createElement('button');
       btn.className = 'rail-server' + (active ? ' active' : '');
       btn.title = s.name;
       btn.textContent = initials(s.name || s.code);
       btn.addEventListener('click', () => switchServer(s.code));
-      rail.appendChild(btn);
+
+      const rm = document.createElement('button');
+      rm.className = 'rail-server-remove';
+      rm.title = 'Remover "' + s.name + '" da lista';
+      rm.textContent = '×';
+      rm.addEventListener('click', ev => {
+        ev.stopPropagation();
+        if (confirm(`Remover "${s.name}" da sua lista de servidores? (o servidor em si continua existindo, você só precisará do código pra entrar de novo)`)) {
+          const wasActive = CallManager.roomCode === s.code;
+          removeServerFromRail(s.code);
+          if (wasActive) {
+            CallManager.leaveRoom();
+            resetRoomUiState();
+            showScreen('lobby');
+          }
+        }
+      });
+
+      wrap.appendChild(btn);
+      wrap.appendChild(rm);
+      rail.appendChild(wrap);
     });
   }
   async function switchServer(code) {

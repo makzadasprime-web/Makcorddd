@@ -97,6 +97,7 @@ const CallManager = (() => {
       channelMembers = {};
       Object.values(channels).forEach(c => { if (c.type === 'voice') channelMembers[c.id] = new Set(); });
       peer = new Peer(peerIdForRoom(roomCode), { debug: 1 });
+      attachReconnectHandling(peer);
 
       peer.on('open', id => {
         myId = id;
@@ -118,6 +119,7 @@ const CallManager = (() => {
       roomCode = code.trim().toUpperCase();
       isHost = false;
       peer = new Peer({ debug: 1 });
+      attachReconnectHandling(peer);
 
       peer.on('open', id => {
         myId = id;
@@ -163,6 +165,39 @@ const CallManager = (() => {
       });
 
       peer.on('error', err => handlePeerError(err, reject));
+    });
+  }
+
+  /* ---------------- manter o peer vivo no broker de sinalização ----------------
+     O broker público do PeerJS derruba a conexão de sinalização (WebSocket) por
+     inatividade, aba em segundo plano, Wi-Fi instável, etc. Isso NÃO destrói o
+     peer nem libera o ID, mas enquanto ele estiver "disconnected" ninguém
+     consegue te encontrar — é a causa mais comum de "servidor não encontrado"
+     depois de um tempo. Aqui a gente detecta e reconecta automaticamente. */
+  function attachReconnectHandling(p) {
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
+    p.on('disconnected', () => {
+      if (p.destroyed) return;
+      fire('systemMessage', 'Conexão com o servidor de sinalização caiu — reconectando…');
+      const tryReconnect = () => {
+        if (p.destroyed || !p.disconnected) return;
+        reconnectAttempts++;
+        p.reconnect();
+        reconnectTimer = setTimeout(tryReconnect, Math.min(2000 * reconnectAttempts, 10000));
+      };
+      reconnectTimer = setTimeout(tryReconnect, 500);
+    });
+    p.on('open', () => {
+      reconnectAttempts = 0;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    });
+    // volta a tentar reconectar assim que a aba fica visível/online de novo
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && p.disconnected && !p.destroyed) p.reconnect();
+    });
+    window.addEventListener('online', () => {
+      if (p.disconnected && !p.destroyed) p.reconnect();
     });
   }
 
@@ -292,8 +327,12 @@ const CallManager = (() => {
         if (isHost) {
           const ok = hostAdmitVoice(msg.id, msg.channelId);
           if (ok) {
+            // aplica localmente no dono (cobre inclusive o próprio dono entrando
+            // na chamada) e depois avisa todo mundo — incluindo quem pediu.
+            handleIncomingMessage({ type: 'call-join', id: msg.id, channelId: msg.channelId }, null);
             hostBroadcast({ type: 'call-join', id: msg.id, channelId: msg.channelId });
-            if (msg.id !== myId) hostSendTo(msg.id, { type: 'call-join', id: msg.id, channelId: msg.channelId });
+          } else if (msg.id === myId) {
+            fire('voiceDenied', msg.channelId);
           } else {
             hostSendTo(msg.id, { type: 'call-join-denied', id: msg.id, channelId: msg.channelId });
           }
@@ -303,8 +342,10 @@ const CallManager = (() => {
         if (!channelMembers[msg.channelId]) channelMembers[msg.channelId] = new Set();
         channelMembers[msg.channelId].add(msg.id);
         fire('voiceRoster', msg.channelId, Array.from(channelMembers[msg.channelId]));
+        // só quem está ENTRANDO conecta com quem já está lá (via applyLocalVoiceJoin);
+        // quem já estava no canal apenas atende (peer.on('call')), pra não criar
+        // duas conexões de mídia duplicadas entre o mesmo par.
         if (msg.id === myId) applyLocalVoiceJoin(msg.channelId);
-        else if (myVoiceChannel === msg.channelId && localStream) connectVoicePeer(msg.id);
         break;
       case 'call-join-denied':
         if (msg.id === myId) fire('voiceDenied', msg.channelId);
