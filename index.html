@@ -711,6 +711,19 @@ const CallManager = (() => {
 
   function peerIdForRoom(code) { return 'makcord-room-' + code; }
 
+  // STUN sozinho não basta quando alguém está atrás de um NAT mais fechado
+  // (4G, rede corporativa/escolar, CGNAT) — a conexão direta nunca fecha e
+  // dá erro de "servidor não encontrado" mesmo o servidor existindo. Um TURN
+  // gratuito serve de retransmissor nesses casos.
+  const ICE_CONFIG = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+    ],
+  };
+
   function defaultChannels() {
     const textId = genChannelId();
     const voiceId = genChannelId();
@@ -747,7 +760,7 @@ const CallManager = (() => {
       channelMembers = {};
       Object.values(channels).forEach(c => { if (c.type === 'voice') channelMembers[c.id] = new Set(); });
       saveChannelsSnapshot(roomCode, channels);
-      peer = new Peer(peerIdForRoom(roomCode), { debug: 1 });
+      peer = new Peer(peerIdForRoom(roomCode), { debug: 1, config: ICE_CONFIG });
       attachReconnectHandling(peer);
 
       peer.on('open', id => {
@@ -780,7 +793,7 @@ const CallManager = (() => {
       myName = name;
       roomCode = code.trim().toUpperCase();
       isHost = false;
-      peer = new Peer({ debug: 1 });
+      peer = new Peer({ debug: 1, config: ICE_CONFIG });
       attachReconnectHandling(peer);
 
       peer.on('open', id => {
