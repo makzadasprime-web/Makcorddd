@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Makcord</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2224%22 fill=%22%236C5CE7%22/><text x=%2250%22 y=%2266%22 font-size=%2255%22 text-anchor=%22middle%22 fill=%22white%22 font-family=%22sans-serif%22>M</text></svg>">
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#6C5CE7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
@@ -334,21 +338,53 @@ video:fullscreen{width:100vw;height:100vh;object-fit:contain;background:#000;}
 
 /* ---------- toggle de áudio da tela ---------- */
 #btn-toggle-screen-audio.active-on{background:var(--accent-soft);color:var(--accent-2);}
+
+/* ---------- login / amigos ---------- */
+.lobby-header-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;}
+.badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--accent-2, #ff5c5c);color:#fff;font-size:10px;font-weight:700;margin-left:4px;}
+.friends-list{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;margin-bottom:14px;}
+.friend-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:var(--bg-soft, rgba(255,255,255,.04));}
+.friend-row .friend-info{display:flex;flex-direction:column;line-height:1.25;}
+.friend-row .friend-email{font-size:11px;opacity:.6;}
+.friend-row-actions{display:flex;gap:6px;}
+.friends-empty-hint{font-size:12px;opacity:.6;padding:4px 2px;}
 </style>
 <body>
 
 <!-- ===================== TELA: BOAS-VINDAS / NOME ===================== -->
-<section id="screen-welcome" class="screen">
+<section id="screen-auth" class="screen">
   <div class="welcome-card">
     <div class="brand">
       <span class="brand-mark">M</span>
       <span class="brand-name">Makcord</span>
     </div>
-    <p class="welcome-sub" id="welcome-sub">Chamadas e chat em grupo entre amigos, direto do navegador.</p>
-    <label class="field-label" for="input-name">Como podemos te chamar?</label>
-    <input id="input-name" class="text-input" type="text" maxlength="20" placeholder="Seu nome" autocomplete="off">
-    <p class="field-hint" id="ip-hint"></p>
-    <button id="btn-continue" class="btn btn-primary btn-block">Continuar</button>
+    <p class="welcome-sub">Chamadas e chat em grupo entre amigos, direto do navegador.</p>
+
+    <div class="lobby-tabs">
+      <button class="tab-btn active" data-authtab="login">Entrar</button>
+      <button class="tab-btn" data-authtab="register">Criar conta</button>
+    </div>
+
+    <div class="tab-panel" id="authtab-login">
+      <label class="field-label" for="login-email">E-mail</label>
+      <input id="login-email" class="text-input" type="email" placeholder="voce@email.com" autocomplete="username">
+      <label class="field-label" for="login-password">Senha</label>
+      <input id="login-password" class="text-input" type="password" placeholder="••••••" autocomplete="current-password">
+      <button id="btn-login" class="btn btn-primary btn-block">Entrar</button>
+    </div>
+
+    <div class="tab-panel hidden" id="authtab-register">
+      <label class="field-label" for="register-name">Seu nome</label>
+      <input id="register-name" class="text-input" type="text" maxlength="20" placeholder="Como te chamam" autocomplete="name">
+      <label class="field-label" for="register-email">E-mail</label>
+      <input id="register-email" class="text-input" type="email" placeholder="voce@email.com" autocomplete="username">
+      <label class="field-label" for="register-password">Senha (mín. 6 caracteres)</label>
+      <input id="register-password" class="text-input" type="password" placeholder="••••••" autocomplete="new-password">
+      <button id="btn-register" class="btn btn-primary btn-block">Criar conta</button>
+    </div>
+
+    <p class="lobby-error" id="auth-error"></p>
+    <p class="field-hint">Sua conta funciona em qualquer aparelho — é só entrar com o mesmo e-mail e senha.</p>
   </div>
 </section>
 
@@ -359,7 +395,11 @@ video:fullscreen{width:100vw;height:100vh;object-fit:contain;background:#000;}
       <span class="brand-mark">M</span>
       <span class="brand-name">Makcord</span>
     </div>
-    <p class="lobby-greeting">Olá, <strong id="lobby-username">amigo</strong> <button id="btn-not-you" class="link-btn">(não é você?)</button></p>
+    <p class="lobby-greeting">Olá, <strong id="lobby-username">amigo</strong></p>
+    <div class="lobby-header-row">
+      <button id="btn-open-friends" class="link-btn">👥 Amigos<span id="friend-request-badge" class="badge hidden">0</span></button>
+      <button id="btn-logout" class="link-btn">Sair da conta</button>
+    </div>
 
     <div class="lobby-servers hidden" id="lobby-servers"></div>
 
@@ -542,6 +582,34 @@ video:fullscreen{width:100vw;height:100vh;object-fit:contain;background:#000;}
         <button id="btn-leave-room" class="btn btn-danger">Sair do servidor</button>
         <button id="btn-save-settings" class="btn btn-primary">Salvar</button>
       </div>
+      <p class="field-hint" style="margin-top:10px;text-align:center;">
+        <button id="btn-logout-room" class="link-btn">Sair da conta</button>
+      </p>
+    </div>
+  </div>
+</div>
+
+<div id="modal-friends" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <span>Amigos</span>
+      <button id="btn-close-friends" class="icon-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field-label">Adicionar por e-mail</label>
+      <div class="avatar-edit-row">
+        <input id="friend-email-input" class="text-input" type="email" placeholder="email@exemplo.com" autocomplete="off">
+        <button id="btn-send-friend-request" class="btn btn-small btn-primary">Adicionar</button>
+      </div>
+      <p class="field-hint" id="friend-add-hint"></p>
+
+      <div id="friend-requests-section" class="hidden">
+        <label class="field-label">Pedidos pendentes</label>
+        <div id="friend-requests-list" class="friends-list"></div>
+      </div>
+
+      <label class="field-label">Seus amigos</label>
+      <div id="friends-list" class="friends-list"></div>
     </div>
   </div>
 </div>
@@ -550,86 +618,187 @@ video:fullscreen{width:100vw;height:100vh;object-fit:contain;background:#000;}
 <div id="audio-sinks" class="hidden"></div>
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 </body>
 <script>
 /* =========================================================
-   IDENTITY.js
-   Como o GitHub Pages não tem backend, "lembrar por IP" é feito
-   assim: buscamos o IP público do visitante numa API gratuita
-   (ipify) e usamos ele como chave no localStorage do navegador
-   para guardar o nome e a foto de perfil escolhidos.
+   AUTH.js — login de verdade (Firebase Auth + Firestore)
 
-   Limitações importantes (deixe isso claro pro usuário):
-   - Isso NÃO é autenticação. Qualquer um no mesmo IP (mesma rede
-     Wi-Fi, mesma empresa, mesma operadora com CG-NAT) vai "herdar"
-     o nome/foto salvos naquele navegador/IP.
-   - localStorage é por navegador. Trocar de navegador, usar aba
-     anônima ou limpar dados apaga a lembrança.
-   - Se o IP mudar (trocou de rede, 4G, VPN), nada é lembrado.
-   - Isso é só uma conveniência, não um sistema de contas.
+   Substitui o antigo sistema de "lembrar por IP". Agora o nome,
+   a senha e a foto ficam guardados no Firebase (nuvem), não no
+   navegador — por isso funcionam em qualquer aparelho, bastando
+   entrar com o mesmo e-mail e senha.
+
+   *** ANTES DE PUBLICAR ***
+   1. Crie um projeto grátis em https://console.firebase.google.com
+   2. Vá em "Build → Authentication → Sign-in method" e ative
+      "E-mail/senha".
+   3. Vá em "Build → Firestore Database" e crie o banco (modo
+      produção). Depois, em "Regras", cole:
+
+        rules_version = '2';
+        service cloud.firestore {
+          match /databases/{database}/documents {
+            match /users/{uid} {
+              allow read: if request.auth != null;
+              allow write: if request.auth != null && request.auth.uid == uid;
+              match /friends/{friendId} {
+                allow read: if request.auth != null &&
+                  (request.auth.uid == uid || request.auth.uid == friendId);
+                allow write: if request.auth != null &&
+                  (request.auth.uid == uid || request.auth.uid == friendId);
+              }
+            }
+            match /friendRequests/{reqId} {
+              allow read, update: if request.auth != null &&
+                (request.auth.uid == resource.data.from || request.auth.uid == resource.data.to);
+              allow create: if request.auth != null && request.auth.uid == request.resource.data.from;
+            }
+          }
+        }
+
+   4. Vá em "Configurações do projeto → Seus apps → Web (</>)",
+      registre o app e copie o objeto "firebaseConfig" pra baixo,
+      substituindo os valores "COLE_AQUI".
    ========================================================= */
 
-const Identity = (() => {
-  const STORAGE_PREFIX = 'makcord:name:';
-  const AVATAR_PREFIX = 'makcord:avatar:';
-  let cachedIp = null;
+const firebaseConfig = {
+  apiKey: "COLE_AQUI",
+  authDomain: "COLE_AQUI.firebaseapp.com",
+  projectId: "COLE_AQUI",
+  storageBucket: "COLE_AQUI.appspot.com",
+  messagingSenderId: "COLE_AQUI",
+  appId: "COLE_AQUI",
+};
+firebase.initializeApp(firebaseConfig);
+const fbAuth = firebase.auth();
+const db = firebase.firestore();
 
-  async function fetchPublicIp() {
-    if (cachedIp) return cachedIp;
-    try {
-      const res = await fetch('https://api.ipify.org?format=json');
-      const data = await res.json();
-      cachedIp = data.ip;
-      return cachedIp;
-    } catch (err) {
-      console.warn('Makcord: não foi possível obter o IP público, seguindo sem memória por IP.', err);
-      return null;
+const Auth = (() => {
+  let currentProfile = null; // { uid, name, email, avatar }
+
+  function friendlyAuthError(err) {
+    const map = {
+      'auth/email-already-in-use': 'Esse e-mail já tem uma conta. Tente entrar em vez de criar.',
+      'auth/invalid-email': 'E-mail inválido.',
+      'auth/weak-password': 'A senha precisa ter pelo menos 6 caracteres.',
+      'auth/user-not-found': 'Não existe conta com esse e-mail.',
+      'auth/wrong-password': 'Senha incorreta.',
+      'auth/invalid-credential': 'E-mail ou senha incorretos.',
+      'auth/too-many-requests': 'Muitas tentativas seguidas. Espere um pouco e tente de novo.',
+      'auth/network-request-failed': 'Falha de rede. Confira sua internet.',
+      'auth/api-key-not-valid.-please-pass-a-valid-api-key.': 'O projeto Firebase ainda não foi configurado neste index.html (veja o topo do AUTH.js).',
+    };
+    return map[err.code] || ('Não foi possível completar: ' + err.message);
+  }
+
+  async function signUp(email, password, name) {
+    email = email.trim().toLowerCase();
+    const cred = await fbAuth.createUserWithEmailAndPassword(email, password);
+    const uid = cred.user.uid;
+    const profile = { name: name.trim(), email, avatar: null, createdAt: Date.now() };
+    await db.collection('users').doc(uid).set(profile);
+    currentProfile = { uid, ...profile };
+    return currentProfile;
+  }
+
+  async function signIn(email, password) {
+    const cred = await fbAuth.signInWithEmailAndPassword(email.trim().toLowerCase(), password);
+    return loadProfile(cred.user.uid);
+  }
+
+  function signOutUser() { return fbAuth.signOut(); }
+
+  async function loadProfile(uid) {
+    const doc = await db.collection('users').doc(uid).get();
+    if (!doc.exists) return null;
+    currentProfile = { uid, ...doc.data() };
+    return currentProfile;
+  }
+
+  function onAuthChange(cb) {
+    fbAuth.onAuthStateChanged(async user => {
+      if (user) { await loadProfile(user.uid); cb(currentProfile); }
+      else { currentProfile = null; cb(null); }
+    });
+  }
+
+  async function updateName(name) {
+    if (!currentProfile) return;
+    await db.collection('users').doc(currentProfile.uid).update({ name });
+    currentProfile.name = name;
+  }
+
+  async function updateAvatar(dataUrl) {
+    if (!currentProfile) return;
+    await db.collection('users').doc(currentProfile.uid).update({ avatar: dataUrl || null });
+    currentProfile.avatar = dataUrl || null;
+  }
+
+  /* ---------- amigos ---------- */
+  async function searchUserByEmail(email) {
+    const snap = await db.collection('users').where('email', '==', email.trim().toLowerCase()).limit(1).get();
+    if (snap.empty) return null;
+    const d = snap.docs[0];
+    return { uid: d.id, ...d.data() };
+  }
+
+  async function sendFriendRequest(toUid) {
+    if (!currentProfile) return;
+    if (toUid === currentProfile.uid) throw new Error('Você não pode adicionar a si mesmo.');
+    const already = await db.collection('users').doc(currentProfile.uid).collection('friends').doc(toUid).get();
+    if (already.exists) throw new Error('Vocês já são amigos.');
+    const existing = await db.collection('friendRequests')
+      .where('from', '==', currentProfile.uid).where('to', '==', toUid).where('status', '==', 'pending').get();
+    if (!existing.empty) throw new Error('Você já tem um pedido pendente pra essa pessoa.');
+    await db.collection('friendRequests').add({
+      from: currentProfile.uid, fromName: currentProfile.name, fromEmail: currentProfile.email,
+      to: toUid, status: 'pending', createdAt: Date.now(),
+    });
+  }
+
+  function listenFriendRequests(cb) {
+    if (!currentProfile) return () => {};
+    return db.collection('friendRequests')
+      .where('to', '==', currentProfile.uid).where('status', '==', 'pending')
+      .onSnapshot(snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.warn('Makcord: erro lendo pedidos de amizade', err));
+  }
+
+  async function respondFriendRequest(reqId, accept) {
+    const ref = db.collection('friendRequests').doc(reqId);
+    const doc = await ref.get();
+    if (!doc.exists) return;
+    const req = doc.data();
+    if (accept) {
+      const batch = db.batch();
+      batch.set(db.collection('users').doc(req.from).collection('friends').doc(req.to), { since: Date.now() });
+      batch.set(db.collection('users').doc(req.to).collection('friends').doc(req.from), { since: Date.now() });
+      batch.update(ref, { status: 'accepted' });
+      await batch.commit();
+    } else {
+      await ref.update({ status: 'rejected' });
     }
   }
 
-  function keyFor(ip) { return STORAGE_PREFIX + ip; }
-  function avatarKeyFor(ip) { return AVATAR_PREFIX + ip; }
-
-  async function getRememberedName() {
-    const ip = await fetchPublicIp();
-    if (!ip) return { name: null, ip: null };
-    const name = localStorage.getItem(keyFor(ip));
-    return { name, ip };
+  function listenFriends(cb) {
+    if (!currentProfile) return () => {};
+    return db.collection('users').doc(currentProfile.uid).collection('friends')
+      .onSnapshot(async snap => {
+        const friends = await Promise.all(snap.docs.map(async d => {
+          const u = await db.collection('users').doc(d.id).get();
+          return u.exists ? { uid: d.id, ...u.data() } : null;
+        }));
+        cb(friends.filter(Boolean));
+      }, err => console.warn('Makcord: erro lendo lista de amigos', err));
   }
 
-  async function rememberName(name) {
-    const ip = await fetchPublicIp();
-    if (!ip) return false;
-    localStorage.setItem(keyFor(ip), name);
-    return true;
-  }
-
-  async function getRememberedAvatar() {
-    const ip = await fetchPublicIp();
-    if (!ip) return null;
-    return localStorage.getItem(avatarKeyFor(ip));
-  }
-
-  async function rememberAvatar(dataUrl) {
-    const ip = await fetchPublicIp();
-    if (!ip) return false;
-    try {
-      if (dataUrl) localStorage.setItem(avatarKeyFor(ip), dataUrl);
-      else localStorage.removeItem(avatarKeyFor(ip));
-      return true;
-    } catch (e) {
-      // localStorage cheio — a foto ainda funciona na sessão atual, só não fica salva
-      console.warn('Makcord: não foi possível salvar a foto localmente.', e);
-      return false;
-    }
-  }
-
-  async function forget() {
-    const ip = await fetchPublicIp();
-    if (ip) { localStorage.removeItem(keyFor(ip)); localStorage.removeItem(avatarKeyFor(ip)); }
-  }
-
-  return { getRememberedName, rememberName, getRememberedAvatar, rememberAvatar, forget, fetchPublicIp };
+  return {
+    signUp, signIn, signOutUser, onAuthChange, updateName, updateAvatar, friendlyAuthError,
+    searchUserByEmail, sendFriendRequest, listenFriendRequests, respondFriendRequest, listenFriends,
+    get profile() { return currentProfile; },
+  };
 })();
 </script>
 <script>
@@ -1387,7 +1556,7 @@ const CallManager = (() => {
   const $$ = sel => Array.from(document.querySelectorAll(sel));
 
   const screens = {
-    welcome: $('#screen-welcome'),
+    auth: $('#screen-auth'),
     lobby: $('#screen-lobby'),
     room: $('#screen-room'),
   };
@@ -1423,27 +1592,28 @@ const CallManager = (() => {
     return `<div class="${sizeClass}" style="background:${colorFor(id)}">${initials(name)}</div>`;
   }
 
-  /* ===================== TELA 1: BOAS-VINDAS / HUB ===================== */
-  // O nome só é pedido na primeira vez neste dispositivo. Depois disso o app
-  // pula direto pro hub (tela "lobby"), que passa a listar os servidores
-  // salvos permanentemente — sem precisar passar pela tela de nome de novo.
-  async function initApp() {
-    const { name, ip } = await Identity.getRememberedName();
-    myAvatar = await Identity.getRememberedAvatar();
-    if (name) {
-      chosenName = name;
-      CallManager.setAvatar(myAvatar);
-      $('#lobby-username').textContent = name;
-      $('#settings-name').value = name;
-      renderServerRail();
-      renderLobbyServers();
-      showScreen('lobby');
-      applyInviteParam();
-    } else {
-      $('#ip-hint').textContent = ip ? 'Vamos lembrar esse nome pra você neste navegador/rede da próxima vez.' : '';
-      showScreen('welcome');
-      $('#input-name').focus();
-    }
+  /* ===================== TELA 1: LOGIN / CADASTRO ===================== */
+  // A sessão fica com o Firebase (não com o navegador), então o mesmo login
+  // funciona em qualquer aparelho. Enquanto não há login, mostramos a tela
+  // de autenticação; assim que há, pulamos direto pro hub (lobby).
+  function initApp() {
+    Auth.onAuthChange(profile => {
+      if (profile) {
+        chosenName = profile.name;
+        myAvatar = profile.avatar || null;
+        CallManager.setAvatar(myAvatar);
+        $('#lobby-username').textContent = chosenName;
+        $('#settings-name').value = chosenName;
+        renderServerRail();
+        renderLobbyServers();
+        startFriendsListeners();
+        showScreen('lobby');
+        applyInviteParam();
+      } else {
+        stopFriendsListeners();
+        showScreen('auth');
+      }
+    });
   }
 
   function applyInviteParam() {
@@ -1456,29 +1626,138 @@ const CallManager = (() => {
     }
   }
 
-  $('#btn-continue').addEventListener('click', continueFromWelcome);
-  $('#input-name').addEventListener('keydown', e => { if (e.key === 'Enter') continueFromWelcome(); });
+  /* ---------- abas login / criar conta ---------- */
+  $$('[data-authtab]').forEach(b => b.addEventListener('click', () => {
+    $$('[data-authtab]').forEach(x => x.classList.toggle('active', x === b));
+    $('#authtab-login').classList.toggle('hidden', b.dataset.authtab !== 'login');
+    $('#authtab-register').classList.toggle('hidden', b.dataset.authtab !== 'register');
+    $('#auth-error').textContent = '';
+  }));
 
-  async function continueFromWelcome() {
-    const name = $('#input-name').value.trim();
-    if (!name) { $('#input-name').focus(); return; }
-    chosenName = name;
-    await Identity.rememberName(name);
-    CallManager.setAvatar(myAvatar);
-    $('#lobby-username').textContent = name;
-    $('#settings-name').value = name;
-    renderServerRail();
-    renderLobbyServers();
-    showScreen('lobby');
-    applyInviteParam();
+  $('#btn-login').addEventListener('click', async () => {
+    const email = $('#login-email').value.trim();
+    const password = $('#login-password').value;
+    if (!email || !password) { $('#auth-error').textContent = 'Preencha e-mail e senha.'; return; }
+    $('#btn-login').disabled = true;
+    try {
+      await Auth.signIn(email, password);
+    } catch (err) {
+      $('#auth-error').textContent = Auth.friendlyAuthError(err);
+    }
+    $('#btn-login').disabled = false;
+  });
+  $('#login-password').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-login').click(); });
+
+  $('#btn-register').addEventListener('click', async () => {
+    const name = $('#register-name').value.trim();
+    const email = $('#register-email').value.trim();
+    const password = $('#register-password').value;
+    if (!name) { $('#auth-error').textContent = 'Diz pra gente como te chamar.'; return; }
+    if (!email || !password) { $('#auth-error').textContent = 'Preencha e-mail e senha.'; return; }
+    $('#btn-register').disabled = true;
+    try {
+      await Auth.signUp(email, password, name);
+    } catch (err) {
+      $('#auth-error').textContent = Auth.friendlyAuthError(err);
+    }
+    $('#btn-register').disabled = false;
+  });
+  $('#register-password').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-register').click(); });
+
+  async function logout() {
+    if (CallManager.roomCode) CallManager.leaveRoom();
+    stopFriendsListeners();
+    await Auth.signOutUser();
+    resetRoomUiState();
+    $('#login-email').value = ''; $('#login-password').value = '';
+    showScreen('auth');
+  }
+  $('#btn-logout').addEventListener('click', logout);
+  $('#btn-logout-room').addEventListener('click', () => {
+    $('#modal-settings').classList.add('hidden');
+    logout();
+  });
+
+  /* ===================== AMIGOS ===================== */
+  let unsubFriendRequests = null;
+  let unsubFriends = null;
+  let pendingRequests = [];
+  let friendsCache = [];
+
+  function startFriendsListeners() {
+    stopFriendsListeners();
+    unsubFriendRequests = Auth.listenFriendRequests(list => {
+      pendingRequests = list;
+      renderFriendRequests();
+    });
+    unsubFriends = Auth.listenFriends(list => {
+      friendsCache = list;
+      renderFriendsList();
+    });
+  }
+  function stopFriendsListeners() {
+    if (unsubFriendRequests) { unsubFriendRequests(); unsubFriendRequests = null; }
+    if (unsubFriends) { unsubFriends(); unsubFriends = null; }
+    pendingRequests = []; friendsCache = [];
   }
 
-  $('#btn-not-you').addEventListener('click', async () => {
-    await Identity.forget();
-    showScreen('welcome');
-    $('#input-name').value = '';
-    $('#ip-hint').textContent = '';
-    $('#input-name').focus();
+  function renderFriendRequests() {
+    $('#friend-request-badge').textContent = pendingRequests.length;
+    $('#friend-request-badge').classList.toggle('hidden', pendingRequests.length === 0);
+    $('#friend-requests-section').classList.toggle('hidden', pendingRequests.length === 0);
+    const box = $('#friend-requests-list');
+    box.innerHTML = '';
+    pendingRequests.forEach(req => {
+      const row = document.createElement('div');
+      row.className = 'friend-row';
+      row.innerHTML = `
+        <div class="friend-info"><strong>${escapeHtml(req.fromName)}</strong><span class="friend-email">${escapeHtml(req.fromEmail)}</span></div>
+        <div class="friend-row-actions">
+          <button class="btn btn-small btn-primary" data-accept="${req.id}">Aceitar</button>
+          <button class="btn btn-small btn-danger" data-reject="${req.id}">Recusar</button>
+        </div>`;
+      box.appendChild(row);
+    });
+    box.querySelectorAll('[data-accept]').forEach(b => b.addEventListener('click', () => Auth.respondFriendRequest(b.dataset.accept, true)));
+    box.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', () => Auth.respondFriendRequest(b.dataset.reject, false)));
+  }
+
+  function renderFriendsList() {
+    const box = $('#friends-list');
+    box.innerHTML = '';
+    if (!friendsCache.length) {
+      box.innerHTML = '<p class="friends-empty-hint">Você ainda não tem amigos adicionados.</p>';
+      return;
+    }
+    friendsCache.forEach(f => {
+      const row = document.createElement('div');
+      row.className = 'friend-row';
+      row.innerHTML = `<div class="friend-info"><strong>${escapeHtml(f.name)}</strong><span class="friend-email">${escapeHtml(f.email)}</span></div>`;
+      box.appendChild(row);
+    });
+  }
+
+  $('#btn-open-friends').addEventListener('click', () => {
+    $('#friend-add-hint').textContent = '';
+    $('#friend-email-input').value = '';
+    $('#modal-friends').classList.remove('hidden');
+  });
+  $('#btn-close-friends').addEventListener('click', () => $('#modal-friends').classList.add('hidden'));
+
+  $('#btn-send-friend-request').addEventListener('click', async () => {
+    const email = $('#friend-email-input').value.trim();
+    const hint = $('#friend-add-hint');
+    if (!email) { hint.textContent = 'Digite um e-mail.'; return; }
+    hint.textContent = 'Procurando...';
+    try {
+      const user = await Auth.searchUserByEmail(email);
+      if (!user) { hint.textContent = 'Não achamos ninguém com esse e-mail no Makcord.'; return; }
+      await Auth.sendFriendRequest(user.uid);
+      hint.textContent = `Pedido enviado para ${user.name}!`;
+      $('#friend-email-input').value = '';
+    } catch (err) {
+      hint.textContent = err.message || 'Não foi possível enviar o pedido.';
+    }
   });
 
   /* ===================== TELA 2: LOBBY ===================== */
@@ -2127,13 +2406,14 @@ const CallManager = (() => {
     if (speakerId && CallManager.speakerSupported()) CallManager.setSpeakerDevice(speakerId);
     if (newName && newName !== chosenName) {
       chosenName = newName;
-      await Identity.rememberName(newName);
+      await Auth.updateName(newName);
       CallManager.changeName(newName);
       $('#mini-name').textContent = newName;
+      $('#lobby-username').textContent = newName;
     }
     if (myAvatar !== CallManager.myAvatar) {
       CallManager.changeAvatar(myAvatar);
-      await Identity.rememberAvatar(myAvatar);
+      await Auth.updateAvatar(myAvatar);
     }
     $('#mini-avatar-wrap').innerHTML = avatarHtml(CallManager.myId, chosenName, myAvatar, 'mini-avatar');
     renderMembers();
@@ -2146,6 +2426,10 @@ const CallManager = (() => {
   });
 
   /* ===================== START ===================== */
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+
   initApp();
 })();
 </script>
