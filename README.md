@@ -25,6 +25,7 @@ Sem isso, a tela de login aparece mas dá erro ao tentar criar conta/entrar.
 ## Funcionalidades
 - **Login por e-mail e senha** (Firebase Authentication): a conta funciona em qualquer aparelho, não depende do navegador ou da rede.
 - **Amigos**: adicione qualquer pessoa cadastrada pelo e-mail dela (botão "👥 Amigos" no hub), aceite/recuse pedidos recebidos. A lista de amigos fica salva na conta.
+- **Chamada privada com amigos**: clique no 📞 ao lado de um amigo na lista pra chamá-lo direto, por voz + chat de texto, sem precisar criar ou entrar em nenhum servidor. Assim que você loga, o Makcord abre uma conexão própria pra sua conta que fica esperando chamadas em qualquer tela do app; se o amigo receber, aparece um convite com Aceitar/Recusar, e a chamada roda numa janelinha flutuante no canto da tela. Só funciona se o amigo estiver com o Makcord aberto em algum aparelho no momento — senão a chamada cai como "não atendeu" depois de alguns segundos.
 - **Servidores**: crie ou entre em vários servidores (salas), com uma barra lateral (rail) pra trocar entre os que você já visitou.
 - **Canais**: dentro de cada servidor, o dono pode criar canais de texto e canais de voz (1 a 50 pessoas por canal de voz).
 - Chamada de voz em grupo via WebRTC (PeerJS), peer-to-peer, só entre quem está no mesmo canal de voz.

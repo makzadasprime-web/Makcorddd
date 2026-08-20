@@ -348,6 +348,40 @@ video:fullscreen{width:100vw;height:100vh;object-fit:contain;background:#000;}
 .friend-row .friend-email{font-size:11px;opacity:.6;}
 .friend-row-actions{display:flex;gap:6px;}
 .friends-empty-hint{font-size:12px;opacity:.6;padding:4px 2px;}
+
+/* ---------- chamada privada (DM) com amigo ---------- */
+.dm-avatar,.incoming-avatar{border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--font-display);flex:none;color:#fff;}
+.dm-avatar{width:38px;height:38px;font-size:14px;}
+.incoming-avatar{width:76px;height:76px;font-size:26px;margin:0 auto 14px;}
+img.dm-avatar,img.incoming-avatar{object-fit:cover;}
+
+.dm-panel{
+  position:fixed;bottom:16px;right:16px;width:300px;max-height:420px;z-index:60;
+  background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-l);
+  box-shadow:0 20px 50px rgba(0,0,0,.45);display:flex;flex-direction:column;overflow:hidden;
+  animation:pulse-in .2s ease;
+}
+.dm-panel-header{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);flex:none;}
+.dm-panel-info{flex:1;min-width:0;}
+.dm-panel-name{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dm-panel-status{font-size:11.5px;color:var(--text-faint);}
+.dm-panel-actions{display:flex;gap:6px;}
+.dm-panel-actions .icon-btn{width:30px;height:30px;font-size:13px;}
+.dm-chat-messages{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-height:120px;}
+.dm-msg{font-size:13px;}
+.dm-msg-author{font-weight:600;margin-right:6px;}
+.dm-msg-time{font-size:10.5px;color:var(--text-faint);}
+.dm-msg-text{color:#dcdce0;word-wrap:break-word;line-height:1.35;}
+.dm-msg-self .dm-msg-author{color:var(--accent-2);}
+.dm-msg-system{color:var(--text-faint);font-size:11.5px;text-align:center;}
+.dm-chat-form{display:flex;gap:6px;padding:10px 12px;border-top:1px solid var(--border);flex:none;}
+.dm-chat-form .text-input{margin-bottom:0;font-size:13px;padding:8px 10px;}
+
+.incoming-call-modal{max-width:320px;padding:28px 24px;text-align:center;}
+.incoming-call-name{font-size:17px;font-weight:700;font-family:var(--font-display);}
+.incoming-call-sub{font-size:13px;color:var(--text-faint);margin:4px 0 20px;}
+.incoming-call-actions{display:flex;gap:10px;}
+.incoming-call-actions .btn{flex:1;}
 </style>
 <body>
 
@@ -613,6 +647,42 @@ video:fullscreen{width:100vw;height:100vh;object-fit:contain;background:#000;}
     </div>
   </div>
 </div>
+
+<!-- Chamada privada (DM) com um amigo — funciona por cima de qualquer tela, sem precisar de servidor -->
+<div id="dm-call-panel" class="dm-panel hidden">
+  <div class="dm-panel-header">
+    <div id="dm-panel-avatar-wrap"></div>
+    <div class="dm-panel-info">
+      <div id="dm-panel-name" class="dm-panel-name"></div>
+      <div id="dm-panel-status" class="dm-panel-status"></div>
+    </div>
+    <div class="dm-panel-actions">
+      <button id="btn-dm-toggle-mic" class="icon-btn" title="Mutar/desmutar" disabled>🎤</button>
+      <button id="btn-dm-hangup" class="icon-btn danger" title="Encerrar chamada">📞</button>
+    </div>
+  </div>
+  <div id="dm-chat-messages" class="dm-chat-messages"></div>
+  <form id="dm-chat-form" class="dm-chat-form">
+    <input id="dm-chat-input" class="text-input" placeholder="Mensagem…" autocomplete="off" maxlength="500">
+    <button class="btn btn-small btn-primary" type="submit">Enviar</button>
+  </form>
+</div>
+
+<!-- Chamada recebida de um amigo -->
+<div id="modal-incoming-call" class="modal-overlay hidden">
+  <div class="modal incoming-call-modal">
+    <div id="incoming-call-avatar-wrap"></div>
+    <div id="incoming-call-name" class="incoming-call-name"></div>
+    <div class="incoming-call-sub">Chamada de voz no Makcord</div>
+    <div class="incoming-call-actions">
+      <button id="btn-decline-call" class="btn btn-danger">Recusar</button>
+      <button id="btn-accept-call" class="btn btn-primary">Aceitar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Áudio remoto da chamada privada -->
+<audio id="dm-remote-audio" autoplay class="hidden"></audio>
 
 <!-- Áudio remoto (elementos <audio> ocultos criados dinamicamente entram aqui) -->
 <div id="audio-sinks" class="hidden"></div>
@@ -1549,6 +1619,208 @@ const CallManager = (() => {
 </script>
 <script>
 /* =========================================================
+   DIRECT-CALL.js — chamada de voz + chat privado 1-a-1 com um amigo,
+   SEM precisar criar ou entrar em nenhum servidor.
+
+   Como funciona: assim que você loga, abrimos um Peer PRÓPRIO e FIXO
+   pra sua conta (ID = "makcord-dm-" + seu uid do Firebase) e deixamos
+   ele aberto o tempo todo, em qualquer tela do app. Pra chamar um
+   amigo, conectamos direto no Peer dele (mesma ideia dos canais de
+   voz dos servidores, só que 1-para-1, sem dono e sem sala) — usamos
+   uma DataConnection pro chat de texto + "toca/desliga" da chamada, e
+   uma MediaConnection separada pro áudio.
+   Se o amigo não estiver com o Makcord aberto em nenhum aparelho, a
+   conexão nunca abre e depois de alguns segundos a chamada cai como
+   "não atendeu".
+   ========================================================= */
+const DirectCall = (() => {
+  const ICE_CONFIG = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+    ],
+  };
+  function peerIdFor(uid) { return 'makcord-dm-' + uid; }
+
+  let peer = null;
+  let myUid = null, myName = null, myAvatar = null;
+  let handlers = {};
+  let dataConn = null;
+  let mediaConn = null;
+  let pendingIncomingCall = null;
+  let localStream = null;
+  let micMuted = false;
+  let state = 'idle'; // idle | calling | ringing | in-call
+  let peerUid = null, peerName = null, peerAvatar = null;
+  let connectTimer = null;
+
+  function on(map) { handlers = { ...handlers, ...map }; }
+  function fire(name, ...args) { if (handlers[name]) handlers[name](...args); }
+
+  function init(uid, name, avatar) {
+    myUid = uid; myName = name; myAvatar = avatar || null;
+    if (peer && !peer.destroyed) return;
+    peer = new Peer(peerIdFor(uid), { debug: 1, config: ICE_CONFIG });
+    peer.on('open', () => {
+      peer.on('connection', conn => onIncomingConnection(conn));
+      peer.on('call', call => onIncomingCall(call));
+    });
+    peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); });
+    peer.on('error', err => {
+      // "unavailable-id" costuma ser a mesma conta já aberta em outra aba/aparelho — ignora
+      if (err.type !== 'unavailable-id') console.warn('Makcord DM peer error:', err);
+    });
+  }
+
+  function updateProfile(name, avatar) { myName = name; myAvatar = avatar || null; }
+
+  function teardown() {
+    endCall();
+    if (peer) { peer.destroy(); peer = null; }
+    myUid = null; myName = null; myAvatar = null;
+  }
+
+  function onIncomingConnection(conn) {
+    if (state !== 'idle') { conn.close(); return; } // já ocupado numa chamada
+    dataConn = conn;
+    const meta = conn.metadata || {};
+    peerUid = meta.uid || conn.peer.replace('makcord-dm-', '');
+    peerName = meta.name || 'Alguém';
+    peerAvatar = meta.avatar || null;
+    state = 'ringing';
+    conn.on('data', msg => handleData(msg));
+    conn.on('close', () => { if (state !== 'in-call') endCall(); });
+    fire('incomingCall', { uid: peerUid, name: peerName, avatar: peerAvatar });
+  }
+
+  function onIncomingCall(call) {
+    if (state !== 'ringing' || call.peer !== peerIdFor(peerUid)) { call.close(); return; }
+    pendingIncomingCall = call;
+  }
+
+  function handleData(msg) {
+    if (msg.type === 'chat') fire('chatMessage', { name: msg.name, text: msg.text, ts: msg.ts, self: false });
+    else if (msg.type === 'hangup') endCall();
+    else if (msg.type === 'decline') { fire('callDeclined'); endCall(); }
+    else if (msg.type === 'mic-state') fire('remoteMicState', msg.muted);
+  }
+
+  function callFriend(friend) {
+    if (!peer || peer.destroyed) return Promise.reject(new Error('Ainda conectando ao Makcord — tente de novo em instantes.'));
+    if (state !== 'idle') return Promise.reject(new Error('Você já está em uma chamada.'));
+    peerUid = friend.uid; peerName = friend.name; peerAvatar = friend.avatar || null;
+    state = 'calling';
+    fire('callStateChanged', 'calling');
+
+    dataConn = peer.connect(peerIdFor(friend.uid), {
+      reliable: true,
+      metadata: { uid: myUid, name: myName, avatar: myAvatar },
+    });
+
+    connectTimer = setTimeout(() => {
+      fire('systemMessage', `${friend.name} não atendeu.`);
+      endCall();
+    }, 25000);
+
+    dataConn.on('open', async () => {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        fire('systemMessage', 'Não foi possível acessar o microfone.');
+        endCall();
+        return;
+      }
+      mediaConn = peer.call(peerIdFor(friend.uid), localStream, {
+        metadata: { uid: myUid, name: myName, avatar: myAvatar },
+      });
+      mediaConn.on('stream', stream => {
+        clearTimeout(connectTimer);
+        state = 'in-call';
+        fire('callStateChanged', 'in-call');
+        fire('remoteStream', stream);
+      });
+      mediaConn.on('close', () => endCall());
+    });
+    dataConn.on('data', msg => handleData(msg));
+    dataConn.on('close', () => { if (state !== 'idle') endCall(); });
+    dataConn.on('error', () => {
+      fire('systemMessage', 'Não foi possível chamar — seu amigo pode estar offline.');
+      endCall();
+    });
+    return Promise.resolve();
+  }
+
+  async function acceptCall() {
+    if (!pendingIncomingCall) return;
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      fire('systemMessage', 'Não foi possível acessar o microfone.');
+      declineCall();
+      return;
+    }
+    mediaConn = pendingIncomingCall;
+    pendingIncomingCall = null;
+    mediaConn.answer(localStream);
+    mediaConn.on('stream', stream => {
+      state = 'in-call';
+      fire('callStateChanged', 'in-call');
+      fire('remoteStream', stream);
+    });
+    mediaConn.on('close', () => endCall());
+  }
+
+  function declineCall() {
+    if (pendingIncomingCall) { pendingIncomingCall.close(); pendingIncomingCall = null; }
+    if (dataConn) { try { dataConn.send({ type: 'decline' }); } catch (e) {} }
+    endCall();
+  }
+
+  function hangUp() {
+    if (dataConn) { try { dataConn.send({ type: 'hangup' }); } catch (e) {} }
+    endCall();
+  }
+
+  function endCall() {
+    clearTimeout(connectTimer);
+    const wasActive = state !== 'idle';
+    if (mediaConn) { mediaConn.close(); mediaConn = null; }
+    if (dataConn) { dataConn.close(); dataConn = null; }
+    if (pendingIncomingCall) { pendingIncomingCall.close(); pendingIncomingCall = null; }
+    if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+    state = 'idle'; micMuted = false; peerUid = null; peerName = null; peerAvatar = null;
+    if (wasActive) fire('callEnded');
+  }
+
+  function sendChat(text) {
+    if (!dataConn) return;
+    const msg = { type: 'chat', name: myName, text, ts: Date.now() };
+    try { dataConn.send(msg); } catch (e) { return; }
+    fire('chatMessage', { name: myName, text, ts: msg.ts, self: true });
+  }
+
+  function toggleMic() {
+    if (!localStream) return micMuted;
+    micMuted = !micMuted;
+    localStream.getAudioTracks().forEach(t => (t.enabled = !micMuted));
+    if (dataConn) { try { dataConn.send({ type: 'mic-state', muted: micMuted }); } catch (e) {} }
+    return micMuted;
+  }
+
+  return {
+    on, init, updateProfile, teardown,
+    callFriend, acceptCall, declineCall, hangUp, sendChat, toggleMic,
+    get state() { return state; },
+    get peerUid() { return peerUid; },
+    get peerName() { return peerName; },
+    get peerAvatar() { return peerAvatar; },
+  };
+})();
+</script>
+<script>
+/* =========================================================
    APP.js — orquestra as telas e liga a UI ao CallManager
    ========================================================= */
 (() => {
@@ -1602,6 +1874,7 @@ const CallManager = (() => {
         chosenName = profile.name;
         myAvatar = profile.avatar || null;
         CallManager.setAvatar(myAvatar);
+        DirectCall.init(profile.uid, chosenName, myAvatar);
         $('#lobby-username').textContent = chosenName;
         $('#settings-name').value = chosenName;
         renderServerRail();
@@ -1611,9 +1884,13 @@ const CallManager = (() => {
         applyInviteParam();
       } else {
         stopFriendsListeners();
+        DirectCall.teardown();
+        closeDmPanel();
+        $('#modal-incoming-call').classList.add('hidden');
         showScreen('auth');
       }
     });
+    initDirectCall();
   }
 
   function applyInviteParam() {
@@ -1732,9 +2009,17 @@ const CallManager = (() => {
     friendsCache.forEach(f => {
       const row = document.createElement('div');
       row.className = 'friend-row';
-      row.innerHTML = `<div class="friend-info"><strong>${escapeHtml(f.name)}</strong><span class="friend-email">${escapeHtml(f.email)}</span></div>`;
+      row.innerHTML = `
+        <div class="friend-info"><strong>${escapeHtml(f.name)}</strong><span class="friend-email">${escapeHtml(f.email)}</span></div>
+        <div class="friend-row-actions">
+          <button class="icon-btn" data-call="${f.uid}" title="Chamar ${escapeHtml(f.name)}">📞</button>
+        </div>`;
       box.appendChild(row);
     });
+    box.querySelectorAll('[data-call]').forEach(b => b.addEventListener('click', () => {
+      const friend = friendsCache.find(x => x.uid === b.dataset.call);
+      if (friend) startCallWithFriend(friend);
+    }));
   }
 
   $('#btn-open-friends').addEventListener('click', () => {
@@ -1759,6 +2044,104 @@ const CallManager = (() => {
       hint.textContent = err.message || 'Não foi possível enviar o pedido.';
     }
   });
+
+  /* ===================== CHAMADA PRIVADA (DM) COM AMIGO ===================== */
+  function initDirectCall() {
+    DirectCall.on({
+      incomingCall: ({ name, avatar }) => showIncomingCallModal(name, avatar),
+      callStateChanged: st => updateDmPanelStatus(st),
+      callEnded: () => { closeDmPanel(); $('#modal-incoming-call').classList.add('hidden'); },
+      callDeclined: () => renderDmSystem('A pessoa recusou a chamada.'),
+      remoteStream: stream => { $('#dm-remote-audio').srcObject = stream; },
+      chatMessage: msg => renderDmMessage(msg),
+      systemMessage: text => renderDmSystem(text),
+      remoteMicState: muted => { if (DirectCall.state === 'in-call') $('#dm-panel-status').textContent = muted ? (DirectCall.peerName + ' está mudo') : 'Em chamada'; },
+    });
+  }
+
+  async function startCallWithFriend(friend) {
+    if (DirectCall.state !== 'idle') { alert('Você já está em uma chamada. Encerre antes de chamar outra pessoa.'); return; }
+    $('#modal-friends').classList.add('hidden');
+    $('#dm-chat-messages').innerHTML = '';
+    openDmPanel(friend.uid, friend.name, friend.avatar, 'Chamando…');
+    try {
+      await DirectCall.callFriend(friend);
+    } catch (err) {
+      renderDmSystem(err.message || 'Não foi possível iniciar a chamada.');
+    }
+  }
+
+  function openDmPanel(uid, name, avatar, status) {
+    $('#dm-panel-avatar-wrap').innerHTML = avatarHtml(uid || name, name, avatar, 'dm-avatar');
+    $('#dm-panel-name').textContent = name;
+    $('#dm-panel-status').textContent = status;
+    $('#btn-dm-toggle-mic').disabled = true;
+    $('#btn-dm-toggle-mic').classList.remove('active-off');
+    $('#btn-dm-toggle-mic').textContent = '🎤';
+    $('#dm-call-panel').classList.remove('hidden');
+  }
+  function closeDmPanel() {
+    $('#dm-call-panel').classList.add('hidden');
+    $('#dm-remote-audio').srcObject = null;
+  }
+  function updateDmPanelStatus(state) {
+    if (state === 'calling') $('#dm-panel-status').textContent = 'Chamando…';
+    else if (state === 'in-call') { $('#dm-panel-status').textContent = 'Em chamada'; $('#btn-dm-toggle-mic').disabled = false; }
+  }
+
+  function showIncomingCallModal(name, avatar) {
+    $('#incoming-call-avatar-wrap').innerHTML = avatarHtml(DirectCall.peerUid || name, name, avatar, 'incoming-avatar');
+    $('#incoming-call-name').textContent = name;
+    $('#modal-incoming-call').classList.remove('hidden');
+  }
+  $('#btn-accept-call').addEventListener('click', async () => {
+    $('#modal-incoming-call').classList.add('hidden');
+    $('#dm-chat-messages').innerHTML = '';
+    openDmPanel(DirectCall.peerUid, DirectCall.peerName, DirectCall.peerAvatar, 'Conectando…');
+    await DirectCall.acceptCall();
+  });
+  $('#btn-decline-call').addEventListener('click', () => {
+    $('#modal-incoming-call').classList.add('hidden');
+    DirectCall.declineCall();
+  });
+
+  $('#btn-dm-hangup').addEventListener('click', () => DirectCall.hangUp());
+  $('#btn-dm-toggle-mic').addEventListener('click', () => {
+    const muted = DirectCall.toggleMic();
+    $('#btn-dm-toggle-mic').classList.toggle('active-off', muted);
+    $('#btn-dm-toggle-mic').textContent = muted ? '🔇' : '🎤';
+  });
+
+  $('#dm-chat-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const input = $('#dm-chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+    DirectCall.sendChat(text);
+    input.value = '';
+  });
+
+  function renderDmMessage(msg) {
+    const box = $('#dm-chat-messages');
+    const row = document.createElement('div');
+    row.className = 'dm-msg' + (msg.self ? ' dm-msg-self' : '');
+    const time = new Date(msg.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    row.innerHTML = `<span class="dm-msg-author">${escapeHtml(msg.self ? 'Você' : msg.name)}</span><span class="dm-msg-time">${time}</span>`;
+    const textEl = document.createElement('div');
+    textEl.className = 'dm-msg-text';
+    textEl.textContent = msg.text;
+    row.appendChild(textEl);
+    box.appendChild(row);
+    box.scrollTop = box.scrollHeight;
+  }
+  function renderDmSystem(text) {
+    const box = $('#dm-chat-messages');
+    const row = document.createElement('div');
+    row.className = 'dm-msg-system';
+    row.textContent = text;
+    box.appendChild(row);
+    box.scrollTop = box.scrollHeight;
+  }
 
   /* ===================== TELA 2: LOBBY ===================== */
   function switchTab(tab) {
@@ -2415,6 +2798,7 @@ const CallManager = (() => {
       CallManager.changeAvatar(myAvatar);
       await Auth.updateAvatar(myAvatar);
     }
+    DirectCall.updateProfile(chosenName, myAvatar);
     $('#mini-avatar-wrap').innerHTML = avatarHtml(CallManager.myId, chosenName, myAvatar, 'mini-avatar');
     renderMembers();
     $('#modal-settings').classList.add('hidden');
