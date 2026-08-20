@@ -349,6 +349,14 @@ video:fullscreen{width:100vw;height:100vh;object-fit:contain;background:#000;}
 .friend-row-actions{display:flex;gap:6px;}
 .friends-empty-hint{font-size:12px;opacity:.6;padding:4px 2px;}
 
+/* ---------- lobby: servidores e amigos em partes separadas ---------- */
+.lobby-section{padding-top:18px;margin-top:18px;border-top:1px solid var(--border);}
+.lobby-section:first-of-type{padding-top:0;margin-top:14px;border-top:none;}
+.lobby-section-title{font-size:13px;font-weight:700;color:var(--text-muted);margin-bottom:10px;letter-spacing:.02em;}
+.lobby-section-friends{background:var(--accent-soft);border:1px solid rgba(108,92,231,.35);border-radius:var(--radius-m);padding:14px;margin-top:20px;}
+.lobby-section-friends .lobby-section-title{color:var(--text-primary);}
+#btn-open-friends{position:relative;}
+
 /* ---------- chamada privada (DM) com amigo ---------- */
 .dm-avatar,.incoming-avatar{border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--font-display);flex:none;color:#fff;}
 .dm-avatar{width:38px;height:38px;font-size:14px;}
@@ -431,31 +439,42 @@ img.dm-avatar,img.incoming-avatar{object-fit:cover;}
     </div>
     <p class="lobby-greeting">Olá, <strong id="lobby-username">amigo</strong></p>
     <div class="lobby-header-row">
-      <button id="btn-open-friends" class="link-btn">👥 Amigos<span id="friend-request-badge" class="badge hidden">0</span></button>
+      <span></span>
       <button id="btn-logout" class="link-btn">Sair da conta</button>
     </div>
 
-    <div class="lobby-servers hidden" id="lobby-servers"></div>
+    <!-- ===== PARTE 1: SERVIDORES ===== -->
+    <div class="lobby-section">
+      <div class="lobby-section-title">🖥️ Servidores</div>
+      <div class="lobby-servers hidden" id="lobby-servers"></div>
 
-    <div class="lobby-tabs">
-      <button class="tab-btn active" data-tab="create">Criar servidor</button>
-      <button class="tab-btn" data-tab="join">Entrar em servidor</button>
+      <div class="lobby-tabs">
+        <button class="tab-btn active" data-tab="create">Criar servidor</button>
+        <button class="tab-btn" data-tab="join">Entrar em servidor</button>
+      </div>
+
+      <div class="tab-panel" id="tab-create">
+        <label class="field-label" for="input-server-name">Nome do servidor</label>
+        <input id="input-server-name" class="text-input" type="text" maxlength="30" placeholder="Ex: Galera do Cs" autocomplete="off">
+        <p class="field-hint">Crie um servidor com canais de texto e voz, e convide quem quiser.</p>
+        <button id="btn-create-room" class="btn btn-primary btn-block">Criar novo servidor</button>
+      </div>
+
+      <div class="tab-panel hidden" id="tab-join">
+        <label class="field-label" for="input-room-code">Código do servidor</label>
+        <input id="input-room-code" class="text-input mono" type="text" maxlength="12" placeholder="EX: A1B2C3" autocomplete="off">
+        <button id="btn-join-room" class="btn btn-primary btn-block">Entrar</button>
+      </div>
+
+      <p class="lobby-error" id="lobby-error"></p>
     </div>
 
-    <div class="tab-panel" id="tab-create">
-      <label class="field-label" for="input-server-name">Nome do servidor</label>
-      <input id="input-server-name" class="text-input" type="text" maxlength="30" placeholder="Ex: Galera do Cs" autocomplete="off">
-      <p class="field-hint">Crie um servidor com canais de texto e voz, e convide quem quiser.</p>
-      <button id="btn-create-room" class="btn btn-primary btn-block">Criar novo servidor</button>
+    <!-- ===== PARTE 2: AMIGOS E CHAMADAS PRIVADAS (separado dos servidores) ===== -->
+    <div class="lobby-section lobby-section-friends">
+      <div class="lobby-section-title">👥 Amigos &amp; chamadas privadas</div>
+      <p class="field-hint" style="margin-top:-2px;">Chame um amigo direto por voz + chat, sem precisar de servidor.</p>
+      <button id="btn-open-friends" class="btn btn-block">Abrir Amigos<span id="friend-request-badge" class="badge hidden">0</span></button>
     </div>
-
-    <div class="tab-panel hidden" id="tab-join">
-      <label class="field-label" for="input-room-code">Código do servidor</label>
-      <input id="input-room-code" class="text-input mono" type="text" maxlength="12" placeholder="EX: A1B2C3" autocomplete="off">
-      <button id="btn-join-room" class="btn btn-primary btn-block">Entrar</button>
-    </div>
-
-    <p class="lobby-error" id="lobby-error"></p>
   </div>
 </section>
 
@@ -468,6 +487,7 @@ img.dm-avatar,img.incoming-avatar{object-fit:cover;}
       <div class="rail-logo" title="Makcord">M</div>
       <div class="server-rail-list" id="server-rail-list"></div>
       <button id="btn-rail-add" class="rail-add" title="Criar ou entrar em outro servidor">+</button>
+      <button id="btn-rail-friends" class="rail-add" title="Amigos e chamadas privadas" style="margin-top:8px;">👥</button>
     </div>
 
     <!-- Sidebar: info do servidor + canais + membros -->
@@ -1667,10 +1687,38 @@ const DirectCall = (() => {
       peer.on('connection', conn => onIncomingConnection(conn));
       peer.on('call', call => onIncomingCall(call));
     });
-    peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); });
+    attachReconnectHandling(peer);
     peer.on('error', err => {
       // "unavailable-id" costuma ser a mesma conta já aberta em outra aba/aparelho — ignora
       if (err.type !== 'unavailable-id') console.warn('Makcord DM peer error:', err);
+    });
+  }
+
+  // mesma lógica de reconexão com backoff do CallManager — reconectar sem
+  // limite/instantaneamente flooda o broker público do PeerJS e pode até
+  // atrapalhar OUTRAS conexões (ex.: entrar em servidores) no mesmo instante.
+  function attachReconnectHandling(p) {
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
+    p.on('disconnected', () => {
+      if (p.destroyed) return;
+      const tryReconnect = () => {
+        if (p.destroyed || !p.disconnected) return;
+        reconnectAttempts++;
+        p.reconnect();
+        reconnectTimer = setTimeout(tryReconnect, Math.min(2000 * reconnectAttempts, 10000));
+      };
+      reconnectTimer = setTimeout(tryReconnect, 500);
+    });
+    p.on('open', () => {
+      reconnectAttempts = 0;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && p.disconnected && !p.destroyed) p.reconnect();
+    });
+    window.addEventListener('online', () => {
+      if (p.disconnected && !p.destroyed) p.reconnect();
     });
   }
 
@@ -1681,6 +1729,8 @@ const DirectCall = (() => {
     if (peer) { peer.destroy(); peer = null; }
     myUid = null; myName = null; myAvatar = null;
   }
+
+  let awaitingAnswer = false; // true = usuário já clicou "Aceitar" mas a chamada de mídia ainda não chegou
 
   function onIncomingConnection(conn) {
     if (state !== 'idle') { conn.close(); return; } // já ocupado numa chamada
@@ -1696,8 +1746,10 @@ const DirectCall = (() => {
   }
 
   function onIncomingCall(call) {
-    if (state !== 'ringing' || call.peer !== peerIdFor(peerUid)) { call.close(); return; }
+    if (state !== 'ringing' && !awaitingAnswer) { call.close(); return; }
+    if (call.peer !== peerIdFor(peerUid)) { call.close(); return; }
     pendingIncomingCall = call;
+    if (awaitingAnswer) answerPendingCall(); // usuário já tinha clicado "Aceitar" — atende assim que a chamada chega
   }
 
   function handleData(msg) {
@@ -1753,7 +1805,7 @@ const DirectCall = (() => {
   }
 
   async function acceptCall() {
-    if (!pendingIncomingCall) return;
+    if (state !== 'ringing') return;
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
@@ -1761,8 +1813,14 @@ const DirectCall = (() => {
       declineCall();
       return;
     }
+    if (pendingIncomingCall) answerPendingCall();
+    else awaitingAnswer = true; // a chamada de mídia ainda está a caminho — atende assim que ela chegar
+  }
+
+  function answerPendingCall() {
     mediaConn = pendingIncomingCall;
     pendingIncomingCall = null;
+    awaitingAnswer = false;
     mediaConn.answer(localStream);
     mediaConn.on('stream', stream => {
       state = 'in-call';
@@ -1790,7 +1848,7 @@ const DirectCall = (() => {
     if (dataConn) { dataConn.close(); dataConn = null; }
     if (pendingIncomingCall) { pendingIncomingCall.close(); pendingIncomingCall = null; }
     if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-    state = 'idle'; micMuted = false; peerUid = null; peerName = null; peerAvatar = null;
+    state = 'idle'; micMuted = false; awaitingAnswer = false; peerUid = null; peerName = null; peerAvatar = null;
     if (wasActive) fire('callEnded');
   }
 
@@ -2023,6 +2081,11 @@ const DirectCall = (() => {
   }
 
   $('#btn-open-friends').addEventListener('click', () => {
+    $('#friend-add-hint').textContent = '';
+    $('#friend-email-input').value = '';
+    $('#modal-friends').classList.remove('hidden');
+  });
+  $('#btn-rail-friends').addEventListener('click', () => {
     $('#friend-add-hint').textContent = '';
     $('#friend-email-input').value = '';
     $('#modal-friends').classList.remove('hidden');
